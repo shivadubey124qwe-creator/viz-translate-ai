@@ -99,7 +99,8 @@ function FittedText({
 
       const fits = (px: number) => {
         el.style.fontSize = `${px}px`;
-        return el.offsetWidth <= maxW + 0.5 && el.offsetHeight <= maxH + 0.5;
+        // Measure the clipping container: it accounts for wrapping and line-height.
+        return box.scrollWidth <= maxW + 0.5 && box.scrollHeight <= maxH + 0.5;
       };
 
       let lo = 6;
@@ -118,6 +119,8 @@ function FittedText({
           }
         }
       }
+      // Safety net: shrink until it truly fits (late CSS/font metrics).
+      while (best > 6 && !fits(best)) best *= 0.92;
       el.style.fontSize = `${best}px`;
       setSize(best);
     };
