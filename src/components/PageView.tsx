@@ -123,11 +123,18 @@ function FittedText({
     };
 
     fit();
-    // Webfonts change metrics after load, and the page scales with the viewport.
+    // Webfonts and stylesheets change metrics after they load, and the page
+    // scales with the viewport, so re-fit a few times and on any resize.
     void document.fonts?.ready.then(fit);
+    const frame = requestAnimationFrame(fit);
+    const timers = [setTimeout(fit, 150), setTimeout(fit, 600)];
     const observer = new ResizeObserver(fit);
     observer.observe(box);
-    return () => observer.disconnect();
+    return () => {
+      observer.disconnect();
+      cancelAnimationFrame(frame);
+      timers.forEach(clearTimeout);
+    };
   }, [text, vertical, sfx]);
 
 
