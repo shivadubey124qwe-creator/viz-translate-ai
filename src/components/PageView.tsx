@@ -83,25 +83,38 @@ function FittedText({
   sfx: boolean;
   onDark: boolean;
 }) {
-  const ref = useRef<HTMLDivElement>(null);
-  const [size, setSize] = useState(16);
+  const boxRef = useRef<HTMLDivElement>(null);
+  const textRef = useRef<HTMLSpanElement>(null);
+  const [size, setSize] = useState(12);
 
   useLayoutEffect(() => {
-    const el = ref.current;
-    const parent = el?.parentElement;
-    if (!el || !parent) return;
-    let lo = 7;
-    let hi = Math.max(10, Math.min(parent.clientHeight, parent.clientWidth * (sfx ? 1.6 : 1)));
+    const box = boxRef.current;
+    const el = textRef.current;
+    if (!box || !el) return;
+
+    const maxW = box.clientWidth;
+    const maxH = box.clientHeight;
+    if (maxW < 4 || maxH < 4) return;
+
+    const fits = (px: number) => {
+      el.style.fontSize = `${px}px`;
+      return el.offsetWidth <= maxW + 0.5 && el.offsetHeight <= maxH + 0.5;
+    };
+
+    let lo = 6;
+    let hi = Math.max(8, sfx ? maxH * 1.1 : maxH);
     let best = lo;
-    for (let i = 0; i < 14 && hi - lo > 0.4; i++) {
-      const mid = (lo + hi) / 2;
-      el.style.fontSize = `${mid}px`;
-      const fits = el.scrollHeight <= parent.clientHeight + 1 && el.scrollWidth <= parent.clientWidth + 1;
-      if (fits) {
-        best = mid;
-        lo = mid;
-      } else {
-        hi = mid;
+    if (fits(hi)) {
+      best = hi;
+    } else {
+      for (let i = 0; i < 16 && hi - lo > 0.3; i++) {
+        const mid = (lo + hi) / 2;
+        if (fits(mid)) {
+          best = mid;
+          lo = mid;
+        } else {
+          hi = mid;
+        }
       }
     }
     el.style.fontSize = `${best}px`;
@@ -109,24 +122,30 @@ function FittedText({
   }, [text, vertical, sfx]);
 
   return (
-    <div
-      ref={ref}
-      style={{
-        fontSize: size,
-        writingMode: vertical && !sfx ? "vertical-rl" : "horizontal-tb",
-        WebkitTextStroke: sfx ? `0.07em ${onDark ? "#111" : "#fff"}` : undefined,
-        paintOrder: "stroke fill",
-        color: sfx ? (onDark ? "#f7f4ee" : "#141210") : undefined,
-      }}
-      className={cn(
-        "flex h-full w-full items-center justify-center text-center break-words hyphens-auto",
-        sfx ? "sfx-text drop-shadow-[0_2px_0_rgba(0,0,0,0.35)]" : "font-bubble leading-[1.06] text-ink",
-      )}
-    >
-      {text}
+    <div ref={boxRef} className="flex h-full w-full items-center justify-center overflow-hidden">
+      <span
+        ref={textRef}
+        style={{
+          fontSize: size,
+          writingMode: vertical && !sfx ? "vertical-rl" : "horizontal-tb",
+          WebkitTextStroke: sfx ? `0.07em ${onDark ? "#111" : "#fff"}` : undefined,
+          paintOrder: "stroke fill",
+          color: sfx ? (onDark ? "#f7f4ee" : "#141210") : undefined,
+          maxWidth: "100%",
+        }}
+        className={cn(
+          "inline-block text-center break-words hyphens-auto",
+          sfx
+            ? "sfx-text drop-shadow-[0_2px_0_rgba(0,0,0,0.35)]"
+            : "font-bubble leading-[1.08] text-ink",
+        )}
+      >
+        {text}
+      </span>
     </div>
   );
 }
+
 
 export function PageView({ page, regions, showTranslation, opacity, onRegionClick }: Props) {
   const fills = useRegionFills(page.url, regions);
