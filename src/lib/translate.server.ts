@@ -14,8 +14,9 @@ export interface PageRegion {
   target: string;
   vertical: boolean;
   rotation: number;
-  emotion?: string;
-  intensity?: number;
+  emotion?: string | undefined;
+  intensity?: number | undefined;
+
   onDark: boolean;
 }
 
