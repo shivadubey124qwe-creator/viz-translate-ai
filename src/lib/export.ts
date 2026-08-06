@@ -1,6 +1,7 @@
 import { zipSync } from "fflate";
 import type { PageRegion } from "./translate.server";
 import type { LoadedPage } from "./loaders";
+import { renderBox } from "./regions";
 
 function wrap(
   ctx: CanvasRenderingContext2D,
@@ -30,10 +31,11 @@ function drawRegion(
   width: number,
   height: number,
 ) {
-  const x = region.box.x * width;
-  const y = region.box.y * height;
-  const w = Math.max(8, region.box.w * width);
-  const h = Math.max(8, region.box.h * height);
+  const box = renderBox(region);
+  const x = box.x * width;
+  const y = box.y * height;
+  const w = Math.max(8, box.w * width);
+  const h = Math.max(8, box.h * height);
   const sfx = region.kind === "sfx";
   const text = (region.target || region.source).trim();
   if (!text) return;

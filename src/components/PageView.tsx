@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PageRegion } from "@/lib/translate.server";
 import type { LoadedPage } from "@/lib/loaders";
 import { cn } from "@/lib/utils";
+import { renderBox } from "@/lib/regions";
 
 interface Props {
   page: LoadedPage;
@@ -33,10 +34,11 @@ function useRegionFills(url: string, regions: PageRegion[]) {
       ctx.drawImage(img, 0, 0);
       const next: Record<string, string> = {};
       for (const region of regions) {
-        const x = Math.round(region.box.x * canvas.width);
-        const y = Math.round(region.box.y * canvas.height);
-        const w = Math.max(2, Math.round(region.box.w * canvas.width));
-        const h = Math.max(2, Math.round(region.box.h * canvas.height));
+        const box = renderBox(region);
+        const x = Math.round(box.x * canvas.width);
+        const y = Math.round(box.y * canvas.height);
+        const w = Math.max(2, Math.round(box.w * canvas.width));
+        const h = Math.max(2, Math.round(box.h * canvas.height));
         const samples: number[][] = [];
         const pad = 3;
         const points = [
@@ -88,7 +90,7 @@ function FittedText({
     const el = ref.current;
     const parent = el?.parentElement;
     if (!el || !parent) return;
-    let lo = 5;
+    let lo = 7;
     let hi = Math.max(10, Math.min(parent.clientHeight, parent.clientWidth * (sfx ? 1.6 : 1)));
     let best = lo;
     for (let i = 0; i < 14 && hi - lo > 0.4; i++) {
@@ -141,6 +143,7 @@ export function PageView({ page, regions, showTranslation, opacity, onRegionClic
         <div className="absolute inset-0" style={{ opacity }}>
           {regions.map((region) => {
             const sfx = region.kind === "sfx";
+            const box = renderBox(region);
             return (
               <button
                 key={region.id}
@@ -148,10 +151,10 @@ export function PageView({ page, regions, showTranslation, opacity, onRegionClic
                 onClick={() => onRegionClick?.(region)}
                 aria-label={`${region.kind}: ${region.target}`}
                 style={{
-                  left: `${region.box.x * 100}%`,
-                  top: `${region.box.y * 100}%`,
-                  width: `${region.box.w * 100}%`,
-                  height: `${region.box.h * 100}%`,
+                  left: `${box.x * 100}%`,
+                  top: `${box.y * 100}%`,
+                  width: `${box.w * 100}%`,
+                  height: `${box.h * 100}%`,
                   transform: region.rotation ? `rotate(${region.rotation}deg)` : undefined,
                   background: sfx ? "transparent" : fills[region.id] ?? "rgb(250,249,245)",
                   padding: sfx ? 0 : "2%",
