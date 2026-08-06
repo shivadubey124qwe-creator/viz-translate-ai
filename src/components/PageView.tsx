@@ -92,34 +92,44 @@ function FittedText({
     const el = textRef.current;
     if (!box || !el) return;
 
-    const maxW = box.clientWidth;
-    const maxH = box.clientHeight;
-    if (maxW < 4 || maxH < 4) return;
+    const fit = () => {
+      const maxW = box.clientWidth;
+      const maxH = box.clientHeight;
+      if (maxW < 4 || maxH < 4) return;
 
-    const fits = (px: number) => {
-      el.style.fontSize = `${px}px`;
-      return el.offsetWidth <= maxW + 0.5 && el.offsetHeight <= maxH + 0.5;
-    };
+      const fits = (px: number) => {
+        el.style.fontSize = `${px}px`;
+        return el.offsetWidth <= maxW + 0.5 && el.offsetHeight <= maxH + 0.5;
+      };
 
-    let lo = 6;
-    let hi = Math.max(8, sfx ? maxH * 1.1 : maxH);
-    let best = lo;
-    if (fits(hi)) {
-      best = hi;
-    } else {
-      for (let i = 0; i < 16 && hi - lo > 0.3; i++) {
-        const mid = (lo + hi) / 2;
-        if (fits(mid)) {
-          best = mid;
-          lo = mid;
-        } else {
-          hi = mid;
+      let lo = 6;
+      let hi = Math.max(8, sfx ? maxH * 1.1 : maxH);
+      let best = lo;
+      if (fits(hi)) {
+        best = hi;
+      } else {
+        for (let i = 0; i < 16 && hi - lo > 0.3; i++) {
+          const mid = (lo + hi) / 2;
+          if (fits(mid)) {
+            best = mid;
+            lo = mid;
+          } else {
+            hi = mid;
+          }
         }
       }
-    }
-    el.style.fontSize = `${best}px`;
-    setSize(best);
+      el.style.fontSize = `${best}px`;
+      setSize(best);
+    };
+
+    fit();
+    // Webfonts change metrics after load, and the page scales with the viewport.
+    void document.fonts?.ready.then(fit);
+    const observer = new ResizeObserver(fit);
+    observer.observe(box);
+    return () => observer.disconnect();
   }, [text, vertical, sfx]);
+
 
   return (
     <div ref={boxRef} className="flex h-full w-full items-center justify-center overflow-hidden">
