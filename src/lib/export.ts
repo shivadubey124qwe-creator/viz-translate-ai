@@ -1,7 +1,7 @@
 import { zipSync } from "fflate";
 import type { PageRegion } from "./translate.server";
 import type { LoadedPage } from "./loaders";
-import { renderBox } from "./regions";
+import { maxFontPx, renderBox } from "./regions";
 
 function wrap(
   ctx: CanvasRenderingContext2D,
@@ -56,7 +56,7 @@ function drawRegion(
   const innerH = h - padding * 2;
   const family = sfx ? "Anton, Impact, sans-serif" : "'Comic Neue', Barlow, sans-serif";
 
-  let fontSize = Math.floor(innerH);
+  let fontSize = Math.floor(Math.min(innerH, maxFontPx({ pageWidth: width, boxHeight: h, sfx })));
   let lines: string[] = [];
   while (fontSize > 6) {
     ctx.font = `${sfx ? "" : "700 "}${fontSize}px ${family}`;
