@@ -35,6 +35,14 @@ function Home() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [language, setLanguage] = useState("English");
+  const [chapterUrl, setChapterUrl] = useState("");
+
+  function start(title: string, pages: Awaited<ReturnType<typeof pagesFromChapter>>) {
+    session.load(title, pages, language);
+    session.ensure(0);
+    session.translateChapter(0);
+    void navigate({ to: "/reader" });
+  }
 
   async function handle(files: FileList | null) {
     if (!files?.length) return;
@@ -42,16 +50,34 @@ function Home() {
     setBusy("Unpacking pages…");
     try {
       const { title, pages } = await loadFiles(Array.from(files));
-      session.load(title, pages, language);
-      session.ensure(0);
-      session.translateChapter(0);
-      void navigate({ to: "/reader" });
+      start(title, pages);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not open that.");
     } finally {
       setBusy(null);
     }
   }
+
+  async function handleUrl(event: React.FormEvent) {
+    event.preventDefault();
+    if (!chapterUrl.trim() || busy) return;
+    setError(null);
+    setBusy("Importing chapter…");
+    try {
+      const result = await importChapter({ data: { url: chapterUrl } });
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+      const pages = await pagesFromChapter(result.chapter);
+      start(result.chapter.title, pages);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That chapter could not be imported.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
 
   return (
     <main className="min-h-screen">
