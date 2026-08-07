@@ -171,9 +171,21 @@ function FittedText({
 
 export function PageView({ page, regions, showTranslation, opacity, onRegionClick }: Props) {
   const fills = useRegionFills(page.url, regions);
+  const rootRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 0, height: 0 });
+
+  useEffect(() => {
+    const el = rootRef.current;
+    if (!el) return;
+    const read = () => setSize({ width: el.clientWidth, height: el.clientHeight });
+    read();
+    const observer = new ResizeObserver(read);
+    observer.observe(el);
+    return () => observer.disconnect();
+  }, []);
 
   return (
-    <div className="relative mx-auto w-full max-w-3xl select-none">
+    <div ref={rootRef} className="relative mx-auto w-full max-w-3xl select-none">
       <img
         src={page.url}
         alt={`Page ${page.index + 1}`}
@@ -198,7 +210,7 @@ export function PageView({ page, regions, showTranslation, opacity, onRegionClic
                   height: `${box.h * 100}%`,
                   transform: region.rotation ? `rotate(${region.rotation}deg)` : undefined,
                   background: sfx ? "transparent" : fills[region.id] ?? "rgb(250,249,245)",
-                  padding: sfx ? 0 : "2%",
+                  padding: sfx ? 0 : "1.5%",
                 }}
                 className={cn(
                   "absolute overflow-hidden text-left",
@@ -210,6 +222,11 @@ export function PageView({ page, regions, showTranslation, opacity, onRegionClic
                   vertical={region.vertical}
                   sfx={sfx}
                   onDark={region.onDark}
+                  maxFont={maxFontPx({
+                    pageWidth: size.width || 700,
+                    boxHeight: box.h * (size.height || 1000),
+                    sfx,
+                  })}
                 />
               </button>
             );
@@ -219,3 +236,4 @@ export function PageView({ page, regions, showTranslation, opacity, onRegionClic
     </div>
   );
 }
+
