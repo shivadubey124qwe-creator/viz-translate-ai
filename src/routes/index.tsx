@@ -129,6 +129,46 @@ function Home() {
             </label>
           </div>
 
+          <form onSubmit={handleUrl} className="mt-6 max-w-2xl">
+            <label
+              htmlFor="chapter-url"
+              className="font-display text-sm tracking-[0.2em] text-muted-foreground"
+            >
+              PASTE CHAPTER URL
+            </label>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <div className="flex flex-1 items-center gap-2 rounded-sm border border-border bg-card px-3">
+                <Link2 className="size-4 shrink-0 text-muted-foreground" />
+                <input
+                  id="chapter-url"
+                  type="url"
+                  inputMode="url"
+                  value={chapterUrl}
+                  onChange={(e) => setChapterUrl(e.target.value)}
+                  placeholder="https://mangadex.org/chapter/…"
+                  className="w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={Boolean(busy) || !chapterUrl.trim()}
+                className="inline-flex items-center justify-center gap-2 rounded-sm border border-primary px-6 py-3 font-display tracking-wide text-primary transition hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
+              >
+                {busy === "Importing chapter…" ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Link2 className="size-4" />
+                )}
+                Import
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Supported: {SUPPORTED_SITES.join(" · ")}. Pages load through this site so they can be
+              translated.
+            </p>
+          </form>
+
+
           {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
 
           <input
