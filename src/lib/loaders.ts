@@ -1,4 +1,7 @@
 import { unzipSync } from "fflate";
+import type { Chapter } from "./import/types";
+import { proxiedImageUrl } from "./import/client";
+
 
 export interface LoadedPage {
   index: number;
