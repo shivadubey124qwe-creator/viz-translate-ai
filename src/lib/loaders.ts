@@ -1,4 +1,7 @@
 import { unzipSync } from "fflate";
+import type { Chapter } from "./import/types";
+import { proxiedImageUrl } from "./import/client";
+
 
 export interface LoadedPage {
   index: number;
@@ -104,14 +107,23 @@ function stripExt(name: string) {
   return name.replace(/\.[^.]+$/, "");
 }
 
-export async function fetchRemotePages(urls: string[]): Promise<LoadedPage[]> {
+/**
+ * Bridges an imported Chapter into the reader/translation pipeline: remote
+ * images are routed through the same-origin proxy and measured, keeping the
+ * adapter's reading order.
+ */
+export async function pagesFromChapter(chapter: Chapter): Promise<LoadedPage[]> {
+  const pages = [...chapter.pages].sort((a, b) => a.index - b.index);
   return Promise.all(
-    urls.map(async (url, index) => {
-      const { width, height } = await measure(url);
-      return { index, name: `remote-${index}`, url, width, height };
+    pages.map(async (page, index) => {
+      const url = proxiedImageUrl(page);
+      const known = page.width > 0 && page.height > 0;
+      const size = known ? { width: page.width, height: page.height } : await measure(url);
+      return { index, name: `page-${String(index + 1).padStart(4, "0")}`, url, ...size };
     }),
   );
 }
+
 
 export async function toDataUrl(url: string, maxEdge = 1400): Promise<string> {
   const img = await new Promise<HTMLImageElement>((resolve, reject) => {

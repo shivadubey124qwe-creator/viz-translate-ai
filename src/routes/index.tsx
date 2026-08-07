@@ -1,8 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
-import { BookOpen, FileArchive, FolderOpen, Languages, Loader2, Zap } from "lucide-react";
-import { loadFiles } from "@/lib/loaders";
+import { BookOpen, FileArchive, FolderOpen, Languages, Link2, Loader2, Zap } from "lucide-react";
+import { loadFiles, pagesFromChapter } from "@/lib/loaders";
+import { importChapter } from "@/lib/import.functions";
+import { SUPPORTED_SITES } from "@/lib/import/client";
 import { session } from "@/lib/session";
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
@@ -32,6 +35,14 @@ function Home() {
   const [busy, setBusy] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [language, setLanguage] = useState("English");
+  const [chapterUrl, setChapterUrl] = useState("");
+
+  function start(title: string, pages: Awaited<ReturnType<typeof pagesFromChapter>>) {
+    session.load(title, pages, language);
+    session.ensure(0);
+    session.translateChapter(0);
+    void navigate({ to: "/reader" });
+  }
 
   async function handle(files: FileList | null) {
     if (!files?.length) return;
@@ -39,16 +50,34 @@ function Home() {
     setBusy("Unpacking pages…");
     try {
       const { title, pages } = await loadFiles(Array.from(files));
-      session.load(title, pages, language);
-      session.ensure(0);
-      session.translateChapter(0);
-      void navigate({ to: "/reader" });
+      start(title, pages);
     } catch (err) {
       setError(err instanceof Error ? err.message : "Could not open that.");
     } finally {
       setBusy(null);
     }
   }
+
+  async function handleUrl(event: React.FormEvent) {
+    event.preventDefault();
+    if (!chapterUrl.trim() || busy) return;
+    setError(null);
+    setBusy("Importing chapter…");
+    try {
+      const result = await importChapter({ data: { url: chapterUrl } });
+      if (!result.ok) {
+        setError(result.message);
+        return;
+      }
+      const pages = await pagesFromChapter(result.chapter);
+      start(result.chapter.title, pages);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "That chapter could not be imported.");
+    } finally {
+      setBusy(null);
+    }
+  }
+
 
   return (
     <main className="min-h-screen">
@@ -99,6 +128,46 @@ function Home() {
               </select>
             </label>
           </div>
+
+          <form onSubmit={handleUrl} className="mt-6 max-w-2xl">
+            <label
+              htmlFor="chapter-url"
+              className="font-display text-sm tracking-[0.2em] text-muted-foreground"
+            >
+              PASTE CHAPTER URL
+            </label>
+            <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+              <div className="flex flex-1 items-center gap-2 rounded-sm border border-border bg-card px-3">
+                <Link2 className="size-4 shrink-0 text-muted-foreground" />
+                <input
+                  id="chapter-url"
+                  type="url"
+                  inputMode="url"
+                  value={chapterUrl}
+                  onChange={(e) => setChapterUrl(e.target.value)}
+                  placeholder="https://mangadex.org/chapter/…"
+                  className="w-full bg-transparent py-3 text-sm outline-none placeholder:text-muted-foreground"
+                />
+              </div>
+              <button
+                type="submit"
+                disabled={Boolean(busy) || !chapterUrl.trim()}
+                className="inline-flex items-center justify-center gap-2 rounded-sm border border-primary px-6 py-3 font-display tracking-wide text-primary transition hover:bg-primary hover:text-primary-foreground disabled:opacity-50"
+              >
+                {busy === "Importing chapter…" ? (
+                  <Loader2 className="size-4 animate-spin" />
+                ) : (
+                  <Link2 className="size-4" />
+                )}
+                Import
+              </button>
+            </div>
+            <p className="mt-2 text-xs text-muted-foreground">
+              Supported: {SUPPORTED_SITES.join(" · ")}. Pages load through this site so they can be
+              translated.
+            </p>
+          </form>
+
 
           {error && <p className="mt-4 text-sm text-destructive">{error}</p>}
 
