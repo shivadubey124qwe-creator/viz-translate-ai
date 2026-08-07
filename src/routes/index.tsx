@@ -1,8 +1,11 @@
 import { createFileRoute, useNavigate } from "@tanstack/react-router";
 import { useRef, useState } from "react";
-import { BookOpen, FileArchive, FolderOpen, Languages, Loader2, Zap } from "lucide-react";
-import { loadFiles } from "@/lib/loaders";
+import { BookOpen, FileArchive, FolderOpen, Languages, Link2, Loader2, Zap } from "lucide-react";
+import { loadFiles, pagesFromChapter } from "@/lib/loaders";
+import { importChapter } from "@/lib/import.functions";
+import { SUPPORTED_SITES } from "@/lib/import/client";
 import { session } from "@/lib/session";
+
 
 export const Route = createFileRoute("/")({
   head: () => ({
