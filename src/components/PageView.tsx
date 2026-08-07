@@ -2,7 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState } from "react";
 import type { PageRegion } from "@/lib/translate.server";
 import type { LoadedPage } from "@/lib/loaders";
 import { cn } from "@/lib/utils";
-import { renderBox } from "@/lib/regions";
+import { maxFontPx, renderBox } from "@/lib/regions";
 
 interface Props {
   page: LoadedPage;
@@ -77,11 +77,13 @@ function FittedText({
   vertical,
   sfx,
   onDark,
+  maxFont,
 }: {
   text: string;
   vertical: boolean;
   sfx: boolean;
   onDark: boolean;
+  maxFont: number;
 }) {
   const boxRef = useRef<HTMLDivElement>(null);
   const textRef = useRef<HTMLSpanElement>(null);
@@ -104,7 +106,7 @@ function FittedText({
       };
 
       let lo = 6;
-      let hi = Math.max(8, sfx ? maxH * 1.1 : maxH);
+      let hi = Math.max(8, Math.min(maxFont, sfx ? maxH * 1.1 : maxH));
       let best = lo;
       if (fits(hi)) {
         best = hi;
@@ -138,7 +140,7 @@ function FittedText({
       cancelAnimationFrame(frame);
       timers.forEach(clearTimeout);
     };
-  }, [text, vertical, sfx]);
+  }, [text, vertical, sfx, maxFont]);
 
 
   return (
