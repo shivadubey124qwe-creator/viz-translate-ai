@@ -130,8 +130,9 @@ export function buildBlock(
     glyphBounds,
     bubbleBounds,
     interior: applyPosition(baseInterior, position),
-    source: override?.source ?? region.source,
-    target: (override?.target ?? region.target ?? "").trim() || region.source,
+    source: clean(override?.source ?? region.source),
+    target: clean(override?.target ?? region.target ?? "") || clean(region.source),
+
     vertical: region.vertical,
     rotation:
       position.rotation ||
