@@ -186,15 +186,93 @@ function pad(box: NBox, ratio: number): NBox {
 }
 
 /**
- * Rebuilds the artwork under the removed glyphs by diffusing the surrounding
- * pixels inward, so gradients, screentones and line art survive instead of
- * being covered by a flat patch.
+ * Structure-preserving reconstruction of the artwork under the removed glyphs.
+ *
+ * Pass 1 is directional: for every unknown pixel each of the four orientations
+ * is probed for the nearest known pixel on both sides, and the orientation
+ * whose two ends agree best wins. That continues line art, panel edges,
+ * screentone rows and speed lines straight through the hole instead of blurring
+ * them away. Pass 2 diffuses whatever pass 1 could not reach, then a light
+ * coherence pass removes seams — only ever on reconstructed pixels.
  */
 function inpaint(data: Uint8ClampedArray, w: number, h: number, unknown: Uint8Array) {
-  const filled = new Uint8Array(unknown.length);
-  for (let i = 0; i < unknown.length; i++) filled[i] = unknown[i] ? 0 : 1;
+  const known = new Uint8Array(unknown.length);
+  for (let i = 0; i < unknown.length; i++) known[i] = unknown[i] ? 0 : 1;
+  const src = data.slice();
+  const DIRS: [number, number][] = [
+    [1, 0],
+    [0, 1],
+    [1, 1],
+    [1, -1],
+  ];
+  const REACH = Math.max(6, Math.min(48, Math.round(Math.max(w, h) * 0.5)));
+  const filled = known.slice();
 
-  for (let pass = 0; pass < 200; pass++) {
+  for (let y = 0; y < h; y++) {
+    for (let x = 0; x < w; x++) {
+      const i = y * w + x;
+      if (known[i]) continue;
+      let bestCost = Number.POSITIVE_INFINITY;
+      let br = 0;
+      let bg = 0;
+      let bb = 0;
+      for (const [dx, dy] of DIRS) {
+        let ax = x;
+        let ay = y;
+        let a = -1;
+        for (let s = 1; s <= REACH; s++) {
+          ax = x - dx * s;
+          ay = y - dy * s;
+          if (ax < 0 || ay < 0 || ax >= w || ay >= h) break;
+          const j = ay * w + ax;
+          if (known[j]) {
+            a = j;
+            break;
+          }
+        }
+        let bx = x;
+        let by = y;
+        let b = -1;
+        for (let s = 1; s <= REACH; s++) {
+          bx = x + dx * s;
+          by = y + dy * s;
+          if (bx < 0 || by < 0 || bx >= w || by >= h) break;
+          const j = by * w + bx;
+          if (known[j]) {
+            b = j;
+            break;
+          }
+        }
+        if (a < 0 || b < 0) continue;
+        const da = Math.hypot(x - (a % w), y - Math.floor(a / w));
+        const db = Math.hypot(x - (b % w), y - Math.floor(b / w));
+        const t = da / Math.max(0.001, da + db);
+        const ar = src[a * 4] ?? 0;
+        const ag = src[a * 4 + 1] ?? 0;
+        const ab = src[a * 4 + 2] ?? 0;
+        const brr = src[b * 4] ?? 0;
+        const bgg = src[b * 4 + 1] ?? 0;
+        const bbb = src[b * 4 + 2] ?? 0;
+        const disagree = Math.abs(ar - brr) + Math.abs(ag - bgg) + Math.abs(ab - bbb);
+        const cost = disagree + (da + db) * 3;
+        if (cost < bestCost) {
+          bestCost = cost;
+          br = ar + (brr - ar) * t;
+          bg = ag + (bgg - ag) * t;
+          bb = ab + (bbb - ab) * t;
+        }
+      }
+      if (!Number.isFinite(bestCost)) continue;
+      data[i * 4] = br;
+      data[i * 4 + 1] = bg;
+      data[i * 4 + 2] = bb;
+      data[i * 4 + 3] = 255;
+      filled[i] = 1;
+    }
+  }
+
+  // Anything with no opposing known pixel in any orientation: diffuse inward.
+  for (let pass = 0; pass < 120; pass++) {
     const newly: number[] = [];
     for (let y = 0; y < h; y++) {
       for (let x = 0; x < w; x++) {
@@ -212,8 +290,6 @@ function inpaint(data: Uint8ClampedArray, w: number, h: number, unknown: Uint8Ar
             if (nx < 0 || ny < 0 || nx >= w || ny >= h) continue;
             const j = ny * w + nx;
             if (!filled[j]) continue;
-            // Diagonal neighbours contribute less: keeps straight line art and
-            // screentone direction continuous instead of smearing diagonally.
             const weight = dx && dy ? 1 : 2;
             r += (data[j * 4] ?? 0) * weight;
             g += (data[j * 4 + 1] ?? 0) * weight;
@@ -233,31 +309,34 @@ function inpaint(data: Uint8ClampedArray, w: number, h: number, unknown: Uint8Ar
     for (const i of newly) filled[i] = 1;
   }
 
-  // Smoothing passes over reconstructed pixels only, removing diffusion banding.
-  for (let pass = 0; pass < 2; pass++) {
-    const copy = data.slice();
-    for (let y = 1; y < h - 1; y++) {
-      for (let x = 1; x < w - 1; x++) {
-        const i = y * w + x;
-        if (!unknown[i]) continue;
-        let r = 0;
-        let g = 0;
-        let b = 0;
-        for (let dy = -1; dy <= 1; dy++) {
-          for (let dx = -1; dx <= 1; dx++) {
-            const j = (y + dy) * w + (x + dx);
-            r += copy[j * 4] ?? 0;
-            g += copy[j * 4 + 1] ?? 0;
-            b += copy[j * 4 + 2] ?? 0;
-          }
+  // One gentle coherence pass: centre-weighted, so reconstructed lines keep
+  // their contrast instead of being averaged into a grey smear.
+  const copy = data.slice();
+  for (let y = 1; y < h - 1; y++) {
+    for (let x = 1; x < w - 1; x++) {
+      const i = y * w + x;
+      if (!unknown[i]) continue;
+      let r = 0;
+      let g = 0;
+      let b = 0;
+      let n = 0;
+      for (let dy = -1; dy <= 1; dy++) {
+        for (let dx = -1; dx <= 1; dx++) {
+          const j = (y + dy) * w + (x + dx);
+          const weight = !dx && !dy ? 4 : dx && dy ? 1 : 2;
+          r += (copy[j * 4] ?? 0) * weight;
+          g += (copy[j * 4 + 1] ?? 0) * weight;
+          b += (copy[j * 4 + 2] ?? 0) * weight;
+          n += weight;
         }
-        data[i * 4] = r / 9;
-        data[i * 4 + 1] = g / 9;
-        data[i * 4 + 2] = b / 9;
       }
+      data[i * 4] = r / n;
+      data[i * 4 + 1] = g / n;
+      data[i * 4 + 2] = b / n;
     }
   }
 }
+
 
 function toDataUrl(data: Uint8ClampedArray, w: number, h: number) {
   const canvas = document.createElement("canvas");
