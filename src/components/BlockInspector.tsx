@@ -6,7 +6,7 @@ import { session } from "@/lib/session";
 import { BlockText, useElementSize } from "./BlockLayer";
 import { cn } from "@/lib/utils";
 
-type Tab = "original" | "cleaned" | "translation";
+type Tab = "original" | "cleaned" | "mask" | "translation";
 
 function Slider({
   label,
