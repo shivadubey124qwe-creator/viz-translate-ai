@@ -83,6 +83,11 @@ function applyPosition(box: NBox, pos: BlockPosition): NBox {
   return { x: cx - w / 2, y: cy - h / 2, w, h };
 }
 
+/** Drops U+FFFD and stray control chars so no block can render "\uFFFD". */
+function clean(text: string) {
+  return text.replace(/[\uFFFD\u0000-\u0008\u000B\u000C\u000E-\u001F]/g, "").trim();
+}
+
 export function buildBlock(
   region: PageRegion,
   vision: BlockVision | undefined,
@@ -91,6 +96,7 @@ export function buildBlock(
 ): TextBlock {
   const kind = (override?.kind ?? region.kind) as BlockKind;
   const sfx = kind === "sfx";
+
   const fallback = renderBox({ ...region, kind });
   const glyphBounds = vision?.glyphBox ?? region.box;
   const bubbleBounds = vision?.bubble ?? fallback;
