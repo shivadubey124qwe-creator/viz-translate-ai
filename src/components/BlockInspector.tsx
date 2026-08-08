@@ -6,7 +6,7 @@ import { session } from "@/lib/session";
 import { BlockText, useElementSize } from "./BlockLayer";
 import { cn } from "@/lib/utils";
 
-type Tab = "original" | "cleaned" | "translation";
+type Tab = "original" | "cleaned" | "mask" | "translation";
 
 function Slider({
   label,
@@ -74,7 +74,11 @@ export function BlockInspector({
   const set = (patch: Parameters<typeof session.setOverride>[1]) =>
     session.setOverride(block.id, patch);
 
-  const aspect = block.bubbleBounds.h / Math.max(0.0001, block.bubbleBounds.w);
+  // The previews are framed on the cleanup crop (glyph bounds) when we have
+  // one, so "cleaned image" always shows the real reconstructed artwork.
+  const frame = block.crop?.box ?? block.bubbleBounds;
+  const aspect = frame.h / Math.max(0.0001, frame.w);
+
 
   return (
     <aside className="fixed inset-x-0 bottom-0 z-40 max-h-[72vh] overflow-y-auto border-t border-border bg-card/98 backdrop-blur md:inset-y-0 md:right-0 md:left-auto md:w-[420px] md:max-h-none md:border-l">
@@ -114,10 +118,10 @@ export function BlockInspector({
       </header>
 
       <div className="space-y-5 px-4 py-4">
-        {/* ---- previews: all three are the same block ---- */}
+        {/* ---- previews: original / cleaned / mask / final, same block ---- */}
         <div>
-          <div className="flex gap-1 text-xs">
-            {(["original", "cleaned", "translation"] as Tab[]).map((t) => (
+          <div className="flex flex-wrap gap-1 text-xs">
+            {(["original", "cleaned", "mask", "translation"] as Tab[]).map((t) => (
               <button
                 key={t}
                 type="button"
@@ -127,53 +131,84 @@ export function BlockInspector({
                   tab === t && "bg-primary text-primary-foreground",
                 )}
               >
-                {t === "cleaned" ? "cleaned image" : t}
+                {t === "cleaned" ? "cleaned image" : t === "mask" ? "glyph mask" : t}
               </button>
             ))}
           </div>
           <div
             ref={ref}
             className="relative mt-2 w-full overflow-hidden rounded-sm border border-border bg-muted"
-            style={{ aspectRatio: `${block.bubbleBounds.w} / ${block.bubbleBounds.h}` }}
+            style={{ aspectRatio: `${frame.w} / ${frame.h}` }}
           >
-            {tab !== "translation" && (
+            {/* the untouched artwork is the base of every preview */}
+            {block.crop && (
               <img
-                src={(tab === "cleaned" ? block.cleaned?.dataUrl : block.crop?.dataUrl) ?? ""}
-                alt={tab === "cleaned" ? "Cleaned artwork" : "Original text"}
+                src={block.crop.dataUrl}
+                alt={tab === "original" ? "Original artwork with source text" : ""}
+                aria-hidden={tab !== "original"}
+                className="absolute inset-0 h-full w-full object-fill"
+              />
+            )}
+            {/* the reconstruction plate is transparent outside the glyphs */}
+            {tab !== "original" && block.cleaned && (
+              <img
+                src={block.cleaned.dataUrl}
+                alt={tab === "cleaned" ? "Reconstructed artwork" : ""}
+                aria-hidden={tab !== "cleaned"}
+                className="absolute inset-0 h-full w-full object-fill"
+              />
+            )}
+            {tab === "mask" && block.maskUrl && (
+              <img
+                src={block.maskUrl}
+                alt="Detected glyph pixels"
                 className="absolute inset-0 h-full w-full object-fill"
               />
             )}
             {tab === "translation" && (
-              <>
-                {block.cleaned ? (
-                  <img
-                    src={block.cleaned.dataUrl}
-                    alt=""
-                    aria-hidden
-                    className="absolute inset-0 h-full w-full object-fill"
-                  />
-                ) : (
-                  <div className="absolute inset-0" style={{ background: block.fill }} />
-                )}
-                <div
-                  className="absolute"
-                  style={{
-                    left: `${((block.interior.x - block.bubbleBounds.x) / block.bubbleBounds.w) * 100}%`,
-                    top: `${((block.interior.y - block.bubbleBounds.y) / block.bubbleBounds.h) * 100}%`,
-                    width: `${(block.interior.w / block.bubbleBounds.w) * 100}%`,
-                    height: `${(block.interior.h / block.bubbleBounds.h) * 100}%`,
-                  }}
-                >
-                  <BlockText
-                    block={block}
-                    pageWidth={size.width / Math.max(0.0001, block.bubbleBounds.w)}
-                    pageHeight={(size.width * aspect) / Math.max(0.0001, block.bubbleBounds.h)}
-                  />
-                </div>
-              </>
+              <div
+                className="absolute"
+                style={{
+                  left: `${((block.interior.x - frame.x) / frame.w) * 100}%`,
+                  top: `${((block.interior.y - frame.y) / frame.h) * 100}%`,
+                  width: `${(block.interior.w / frame.w) * 100}%`,
+                  height: `${(block.interior.h / frame.h) * 100}%`,
+                  transform: block.rotation ? `rotate(${block.rotation}deg)` : undefined,
+                }}
+              >
+                <BlockText
+                  block={block}
+                  pageWidth={size.width / Math.max(0.0001, frame.w)}
+                  pageHeight={(size.width * aspect) / Math.max(0.0001, frame.h)}
+                />
+              </div>
             )}
           </div>
+          <dl className="mt-2 grid grid-cols-2 gap-x-3 gap-y-0.5 text-[11px] text-muted-foreground">
+            <div>
+              confidence <span className="text-foreground">{(block.confidence * 100).toFixed(0)}%</span>
+            </div>
+            <div>
+              render <span className="text-foreground">{block.renderMs}ms</span>
+            </div>
+            <div>
+              rotation <span className="text-foreground">{block.rotation.toFixed(1)}°</span>
+            </div>
+            <div>
+              bubble <span className="text-foreground">{block.hasBubble ? "yes" : "none"}</span>
+            </div>
+            <div>
+              glyph box{" "}
+              <span className="text-foreground">
+                {(block.glyphBounds.w * 100).toFixed(1)}×{(block.glyphBounds.h * 100).toFixed(1)}%
+              </span>
+            </div>
+            <div>
+              ink <span className="text-foreground">{(block.inkRatio * 100).toFixed(0)}%</span>
+            </div>
+          </dl>
         </div>
+
 
         {/* ---- text editing ---- */}
         <div className="space-y-2">

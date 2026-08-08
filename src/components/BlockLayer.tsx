@@ -86,6 +86,11 @@ export function BlockLayer({
 }) {
   return (
     <div className="absolute inset-0" style={{ opacity }}>
+      {/*
+        Reconstruction plates. Each plate is a transparent PNG whose only opaque
+        pixels are the removed original glyphs, so artwork is never covered by a
+        rectangle. There is deliberately no solid-colour fallback.
+      */}
       {blocks.map((block) =>
         block.cleaned ? (
           <img
@@ -101,22 +106,9 @@ export function BlockLayer({
               height: `${block.cleaned.box.h * 100}%`,
             }}
           />
-        ) : !block.hasBubble && block.kind !== "sfx" ? (
-          <div
-            key={`${block.id}-plate`}
-            aria-hidden
-            className="pointer-events-none absolute"
-            style={{
-              left: `${block.bubbleBounds.x * 100}%`,
-              top: `${block.bubbleBounds.y * 100}%`,
-              width: `${block.bubbleBounds.w * 100}%`,
-              height: `${block.bubbleBounds.h * 100}%`,
-              background: block.fill,
-              borderRadius: "8px",
-            }}
-          />
         ) : null,
       )}
+
 
       {blocks.map((block) => (
         <button

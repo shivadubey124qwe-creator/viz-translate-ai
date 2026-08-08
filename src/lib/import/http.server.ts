@@ -35,10 +35,34 @@ async function guarded(url: string, init?: RequestInit) {
   return res;
 }
 
+/**
+ * Decodes with the charset the site actually uses. Many Korean/Japanese readers
+ * still serve EUC-KR / Shift_JIS and only declare it in a <meta> tag, which is
+ * where the U+FFFD replacement characters came from.
+ */
+function decodeHtml(buffer: ArrayBuffer, contentType: string | null): string {
+  const bytes = new Uint8Array(buffer);
+  const fromHeader = /charset=["']?([\w-]+)/i.exec(contentType ?? "")?.[1];
+  const ascii = new TextDecoder("utf-8").decode(bytes.subarray(0, 4096));
+  const fromMeta =
+    /<meta[^>]+charset=["']?([\w-]+)/i.exec(ascii)?.[1] ??
+    /<meta[^>]+content=["'][^"']*charset=([\w-]+)/i.exec(ascii)?.[1];
+  const label = (fromHeader ?? fromMeta ?? "utf-8").toLowerCase();
+  for (const candidate of [label, "utf-8"]) {
+    try {
+      return new TextDecoder(candidate, { fatal: false }).decode(bytes);
+    } catch {
+      /* unknown label — fall through to utf-8 */
+    }
+  }
+  return new TextDecoder("utf-8").decode(bytes);
+}
+
 export async function fetchHtml(url: string, referer?: string): Promise<string> {
   const res = await guarded(url, { headers: browserHeaders(url, referer) });
-  return res.text();
+  return decodeHtml(await res.arrayBuffer(), res.headers.get("content-type"));
 }
+
 
 export async function fetchJson<T>(url: string): Promise<T> {
   const res = await guarded(url, {
