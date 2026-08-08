@@ -43,9 +43,11 @@ export interface TextBlock {
   id: string;
   pageIndex: number;
   kind: BlockKind;
-  /** OCR glyph bounds */
+  /** OCR glyph bounds (hint only — never a cleanup region) */
   textBounds: NBox;
-  /** detected bubble/plate bounds */
+  /** tight bounds of the ORIGINAL glyph pixels */
+  glyphBounds: NBox;
+  /** detected bubble contour bounds (layout only) */
   bubbleBounds: NBox;
   /** safe interior the text must stay inside */
   interior: NBox;
@@ -59,8 +61,15 @@ export interface TextBlock {
   inkRatio: number;
   hasBubble: boolean;
   fill: string;
+  /** 0..1 confidence in the glyph segmentation */
+  confidence: number;
+  /** ms spent measuring/cleaning this block */
+  renderMs: number;
+  /** transparent reconstruction plate — glyph pixels only */
   cleaned?: { box: NBox; dataUrl: string } | undefined;
   crop?: { box: NBox; dataUrl: string } | undefined;
+  /** debug overlay of the glyph mask */
+  maskUrl?: string | undefined;
   typography: Typography;
   position: BlockPosition;
   edited: boolean;
@@ -83,6 +92,7 @@ export function buildBlock(
   const kind = (override?.kind ?? region.kind) as BlockKind;
   const sfx = kind === "sfx";
   const fallback = renderBox({ ...region, kind });
+  const glyphBounds = vision?.glyphBox ?? region.box;
   const bubbleBounds = vision?.bubble ?? fallback;
   const baseInterior = vision?.interior ?? fallback;
   const position = { ...IDENTITY_POSITION, ...override?.position };
@@ -94,26 +104,44 @@ export function buildBlock(
     inkRatio: vision?.inkRatio,
   });
 
+  // SFX inherit the original lettering's visual structure: measured fill, its
+  // real outline colour when one exists, and the detected stroke thickness.
+  const measured: Partial<Typography> = sfx
+    ? {
+        color: vision?.glyphColor ?? auto.color,
+        strokeColor: vision?.glyphOutline ?? auto.strokeColor,
+        strokeWidth: vision?.glyphOutline
+          ? Math.max(auto.strokeWidth, vision.strokeEm)
+          : auto.strokeWidth,
+      }
+    : {};
+
   return {
     id: region.id,
     pageIndex,
     kind,
     textBounds: region.box,
+    glyphBounds,
     bubbleBounds,
     interior: applyPosition(baseInterior, position),
     source: override?.source ?? region.source,
     target: (override?.target ?? region.target ?? "").trim() || region.source,
     vertical: region.vertical,
-    rotation: position.rotation || region.rotation || 0,
+    rotation:
+      position.rotation ||
+      (sfx ? vision?.angle || region.rotation || 0 : region.rotation || 0),
     onDark,
     emotion: region.emotion,
     intensity: region.intensity,
     inkRatio: vision?.inkRatio ?? 0.2,
     hasBubble: vision?.hasBubble ?? false,
     fill: vision?.fill ?? (onDark ? "rgb(24,22,20)" : "rgb(250,249,245)"),
-    cleaned: sfx && !vision?.hasBubble ? vision?.cleaned : vision?.cleaned,
+    confidence: vision?.confidence ?? 0,
+    renderMs: vision?.renderMs ?? 0,
+    cleaned: vision?.cleaned,
     crop: vision?.crop,
-    typography: { ...auto, ...override?.typography },
+    maskUrl: vision?.maskUrl,
+    typography: { ...auto, ...measured, ...override?.typography },
     position,
     edited: Boolean(
       override &&
@@ -125,6 +153,7 @@ export function buildBlock(
     ),
   };
 }
+
 
 export function buildBlocks(
   regions: PageRegion[],
