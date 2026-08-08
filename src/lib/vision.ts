@@ -216,7 +216,7 @@ function toDataUrl(data: Uint8ClampedArray, w: number, h: number) {
   canvas.height = h;
   const ctx = canvas.getContext("2d");
   if (!ctx) return "";
-  ctx.putImageData(new ImageData(data, w, h), 0, 0);
+  ctx.putImageData(new ImageData(data as Uint8ClampedArray<ArrayBuffer>, w, h), 0, 0);
   return canvas.toDataURL("image/png");
 }
 
