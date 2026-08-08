@@ -81,8 +81,8 @@ export function BlockLayer({
   pageWidth: number;
   pageHeight: number;
   opacity: number;
-  onSelect?: (block: TextBlock) => void;
-  selectedId?: string | null;
+  onSelect?: ((block: TextBlock) => void) | undefined;
+  selectedId?: string | null | undefined;
 }) {
   return (
     <div className="absolute inset-0" style={{ opacity }}>
