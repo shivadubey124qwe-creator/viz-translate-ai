@@ -539,6 +539,12 @@ function analyzeOne(
     if (size < minComp || size > maxComp || spansAll) continue;
     // A glyph is never a thin full-width rule (panel border / underline).
     if ((cw > gw * 0.9 && chh < gh * 0.06) || (chh > gh * 0.9 && cw < gw * 0.06)) continue;
+    // Long shapes that run out of the search box are artwork: bubble outlines,
+    // panel edges, hair, speed lines. Removing them would damage the balloon.
+    const touchesEdge =
+      comp.x0 === 0 || comp.y0 === 0 || comp.x1 === gw - 1 || comp.y1 === gh - 1;
+    if (touchesEdge && (cw > gw * 0.5 || chh > gh * 0.5)) continue;
+
     for (const i of comp.pixels) glyph[i] = 1;
     kept++;
     keptPixels += size;
