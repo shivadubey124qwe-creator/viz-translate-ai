@@ -259,14 +259,9 @@ class SessionStore {
 
   setOverride(id: string, patch: BlockOverride) {
     const current = this.snapshot.overrides[id] ?? {};
-    const merged: BlockOverride = {
-      ...current,
-      ...patch,
-      typography: patch.typography
-        ? { ...current.typography, ...patch.typography }
-        : current.typography,
-      position: patch.position ? { ...current.position, ...patch.position } : current.position,
-    };
+    const merged: BlockOverride = { ...current, ...patch };
+    if (patch.typography) merged.typography = { ...current.typography, ...patch.typography };
+    if (patch.position) merged.position = { ...current.position, ...patch.position };
     this.commit({ ...this.snapshot.overrides, [id]: merged });
   }
 
