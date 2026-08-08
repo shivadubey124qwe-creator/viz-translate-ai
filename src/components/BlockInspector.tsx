@@ -74,7 +74,11 @@ export function BlockInspector({
   const set = (patch: Parameters<typeof session.setOverride>[1]) =>
     session.setOverride(block.id, patch);
 
-  const aspect = block.bubbleBounds.h / Math.max(0.0001, block.bubbleBounds.w);
+  // The previews are framed on the cleanup crop (glyph bounds) when we have
+  // one, so "cleaned image" always shows the real reconstructed artwork.
+  const frame = block.crop?.box ?? block.bubbleBounds;
+  const aspect = frame.h / Math.max(0.0001, frame.w);
+
 
   return (
     <aside className="fixed inset-x-0 bottom-0 z-40 max-h-[72vh] overflow-y-auto border-t border-border bg-card/98 backdrop-blur md:inset-y-0 md:right-0 md:left-auto md:w-[420px] md:max-h-none md:border-l">
