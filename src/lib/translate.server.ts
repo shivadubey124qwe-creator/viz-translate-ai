@@ -1,4 +1,7 @@
+import { routeTranslation } from "./providers.server";
+
 export type RegionKind =
+
   | "speech"
   | "thought"
   | "narration"
@@ -183,7 +186,9 @@ export async function runPageTranslation(input: {
     regions,
     glossary: (parsed.glossary ?? []).filter((g) => g?.source && g?.target),
     summary: parsed.summary ?? input.contextSummary,
-    engine: MODEL,
+    engine: provider,
+    provider,
+
     latencyMs: Date.now() - started,
   };
 }
