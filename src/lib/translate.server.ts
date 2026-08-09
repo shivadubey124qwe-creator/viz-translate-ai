@@ -33,11 +33,11 @@ export interface PageTranslation {
   glossary: GlossaryEntry[];
   summary: string;
   engine: string;
+  /** Non-secret identifier of the provider/key that served this page. */
+  provider: string;
   latencyMs: number;
 }
 
-const GATEWAY = "https://ai.gateway.lovable.dev/v1/chat/completions";
-const MODEL = "google/gemini-3.6-flash";
 
 const SYSTEM = `You are the MangaLens AI page pipeline: OCR, bubble/SFX detection, context analysis and localisation in one pass.
 
