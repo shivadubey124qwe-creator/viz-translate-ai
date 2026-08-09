@@ -4,14 +4,29 @@ import { translatePage } from "./translate.functions";
 import { toDataUrl, type LoadedPage } from "./loaders";
 import { analyzeRegions, type BlockVision } from "./vision";
 import type { BlockOverride } from "./blocks";
+import {
+  renderCache,
+  translationCache,
+  idbClearAll,
+  loadReadingPosition,
+  saveReadingPosition,
+  type CacheIdentity,
+} from "./cache";
 
-export type PageStatus = "idle" | "queued" | "working" | "done" | "error";
+export type PageStatus =
+  | "idle"
+  | "queued"
+  | "translating"
+  | "cleaning"
+  | "done"
+  | "error";
 
 export interface PageState {
   status: PageStatus;
   translation?: PageTranslation;
   error?: string;
-  fromCache?: boolean;
+  /** Where the result came from: "memory" | "cache" | "network". */
+  origin?: "memory" | "cache" | "network";
 }
 
 export interface SessionSnapshot {
@@ -21,7 +36,7 @@ export interface SessionSnapshot {
   glossary: GlossaryEntry[];
   summary: string;
   targetLanguage: string;
-  /** Bubble/cleanup analysis per page, keyed by region id. */
+  /** Bubble/cleanup analysis per page, keyed by region id (in-memory window). */
   visions: Record<number, Record<string, BlockVision>>;
   /** Manual block edits, keyed by region id. */
   overrides: Record<string, BlockOverride>;
@@ -31,11 +46,7 @@ export interface SessionSnapshot {
 }
 
 const MAX_PARALLEL = 2;
-const PREFETCH_DEPTH = 3;
 
-function cacheKey(title: string, index: number) {
-  return `mangalens:page:${title}:${index}`;
-}
 function tmKey(title: string) {
   return `mangalens:tm:${title}`;
 }
@@ -46,14 +57,23 @@ function overrideKey(title: string) {
   return `mangalens:blocks:${title}`;
 }
 
+interface QueueItem {
+  index: number;
+  priority: number;
+}
+
 class SessionStore {
   private listeners = new Set<() => void>();
   private running = 0;
-  private queue: number[] = [];
+  private queue: QueueItem[] = [];
   private latencies: number[] = [];
   private analyzing = new Set<number>();
   private undoStack: Record<string, BlockOverride>[] = [];
   private redoStack: Record<string, BlockOverride>[] = [];
+  /** Vision results survive DOM unmount; only the snapshot window is pruned. */
+  private visionMemory = new Map<number, Record<string, BlockVision>>();
+  private translationMemory = new Map<number, PageTranslation>();
+  private hydrating = new Set<number>();
 
   private snapshot: SessionSnapshot = {
     title: "",
@@ -89,6 +109,16 @@ class SessionStore {
     return this.snapshot.pages.length > 0;
   }
 
+  private identity(index: number): CacheIdentity {
+    const page = this.snapshot.pages[index];
+    return {
+      chapterId: this.snapshot.title || "chapter",
+      pageIndex: index,
+      sourceKey: `${page?.name ?? index}|${page?.width ?? 0}x${page?.height ?? 0}`,
+      targetLanguage: this.snapshot.targetLanguage,
+    };
+  }
+
   load(title: string, pages: LoadedPage[], targetLanguage = "English") {
     this.queue = [];
     this.running = 0;
@@ -96,6 +126,9 @@ class SessionStore {
     this.analyzing.clear();
     this.undoStack = [];
     this.redoStack = [];
+    this.visionMemory.clear();
+    this.translationMemory.clear();
+    this.hydrating.clear();
     const glossary = readJson<GlossaryEntry[]>(tmKey(title)) ?? [];
     const summary = localStorage.getItem(summaryKey(title)) ?? "";
     const overrides = readJson<Record<string, BlockOverride>>(overrideKey(title)) ?? {};
@@ -119,57 +152,98 @@ class SessionStore {
     this.emit({ targetLanguage: lang });
   }
 
-  /** Ensures page `index` is translated and keeps the next pages warm. */
-  ensure(index: number) {
-    this.request(index, true);
-    for (let i = 1; i <= PREFETCH_DEPTH; i++) this.request(index + i, false);
+  savePosition(pageIndex: number, scrollY: number, mode: string, fullscreen: boolean) {
+    if (!this.snapshot.title) return;
+    void saveReadingPosition({
+      chapterId: this.snapshot.title,
+      pageIndex,
+      scrollY,
+      mode,
+      targetLanguage: this.snapshot.targetLanguage,
+      fullscreen,
+      updatedAt: Date.now(),
+    });
   }
 
-  /** Background pass over the rest of the chapter, never blocking the reader. */
+  position() {
+    return this.snapshot.title ? loadReadingPosition(this.snapshot.title) : Promise.resolve(null);
+  }
+
+  /**
+   * Ensures the reading position is translated and keeps pages warm in the
+   * direction of travel. Never re-runs work that is already cached.
+   */
+  ensure(index: number, direction: 1 | -1 = 1, depth = 3) {
+    void this.request(index, 0);
+    for (let i = 1; i <= depth; i++) void this.request(index + i * direction, i);
+    void this.request(index - direction, depth + 1);
+  }
+
+  /** Background pass over the rest of the chapter, never blocking scrolling. */
   translateChapter(from: number) {
-    for (let i = from; i < this.snapshot.pages.length; i++) this.request(i, false);
+    for (let i = from; i < this.snapshot.pages.length; i++) void this.request(i, 100 + i);
   }
 
-  private request(index: number, priority: boolean) {
+  private async request(index: number, priority: number) {
     const page = this.snapshot.pages[index];
     if (!page) return;
     const state = this.snapshot.states[index];
     if (state && state.status !== "error" && state.status !== "idle") return;
+    if (this.hydrating.has(index)) return;
 
-    const cached = readJson<PageTranslation>(cacheKey(this.snapshot.title, index));
+    // 1. in-memory result (survives page unmount)
+    const inMemory = this.translationMemory.get(index);
+    if (inMemory) {
+      this.setPage(index, { status: "done", translation: inMemory, origin: "memory" });
+      return;
+    }
+
+    // 2. persistent cache — instant, no OCR/translation/API call
+    this.hydrating.add(index);
+    const cached = await translationCache.get<PageTranslation>(this.identity(index));
+    this.hydrating.delete(index);
     if (cached) {
-      this.setPage(index, { status: "done", translation: cached, fromCache: true });
+      this.translationMemory.set(index, cached);
+      this.setPage(index, { status: "done", translation: cached, origin: "cache" });
       this.emit({
-        stats: {
-          ...this.snapshot.stats,
-          cacheHits: this.snapshot.stats.cacheHits + 1,
-        },
+        stats: { ...this.snapshot.stats, cacheHits: this.snapshot.stats.cacheHits + 1 },
       });
       return;
     }
 
+    // 3. queue for processing
+    if (this.queue.some((q) => q.index === index)) return;
     this.setPage(index, { status: "queued" });
-    if (priority) this.queue.unshift(index);
-    else this.queue.push(index);
+    this.queue.push({ index, priority });
+    this.queue.sort((a, b) => a.priority - b.priority);
     this.pump();
   }
 
   private pump() {
     while (this.running < MAX_PARALLEL && this.queue.length) {
       const next = this.queue.shift();
-      if (next === undefined) return;
+      if (!next) return;
       this.running++;
-      void this.work(next).finally(() => {
+      void this.work(next.index).finally(() => {
         this.running--;
         this.pump();
       });
     }
   }
 
+  private previousPageText(index: number) {
+    const prev = this.translationMemory.get(index - 1);
+    if (!prev) return "";
+    return prev.regions
+      .map((r) => r.target)
+      .filter(Boolean)
+      .join(" / ");
+  }
+
   private async work(index: number) {
     const page = this.snapshot.pages[index];
     if (!page) return;
-    this.setPage(index, { status: "working" });
+    this.setPage(index, { status: "translating" });
     try {
       const imageDataUrl = await toDataUrl(page.url);
       const result = await translatePage({
@@ -180,17 +254,19 @@ class SessionStore {
           targetLanguage: this.snapshot.targetLanguage,
           glossary: this.snapshot.glossary.slice(0, 120),
           contextSummary: this.snapshot.summary,
+          previousPageText: this.previousPageText(index),
         },
       });
 
-      writeJson(cacheKey(this.snapshot.title, index), result);
+      this.translationMemory.set(index, result);
+      void translationCache.set(this.identity(index), result);
       this.mergeGlossary(result.glossary);
       if (result.summary) {
         localStorage.setItem(summaryKey(this.snapshot.title), result.summary);
         this.emit({ summary: result.summary });
       }
       this.latencies.push(result.latencyMs);
-      this.setPage(index, { status: "done", translation: result });
+      this.setPage(index, { status: "done", translation: result, origin: "network" });
       this.emit({
         stats: {
           translated: this.snapshot.stats.translated + 1,
@@ -201,6 +277,8 @@ class SessionStore {
         },
       });
     } catch (err) {
+      // A provider failure is scoped to this page only: the reader, cached
+      // pages and navigation all stay usable.
       this.setPage(index, {
         status: "error",
         error: err instanceof Error ? err.message : "Translation failed.",
@@ -208,34 +286,61 @@ class SessionStore {
     }
   }
 
-  // ---- vision (bubble detection + cleanup) --------------------------------
+  // ---- vision (bubble geometry + glyph cleanup) ----------------------------
 
   /**
-   * Measures bubbles and builds cleaned plates for a page. Runs once per page,
-   * is never triggered by mode switches, and never re-runs OCR or translation.
+   * Measures bubbles and builds transparent reconstruction plates for a page.
+   * Runs at most once per page: results are held in memory and mirrored into the
+   * render cache, so scrolling back never reprocesses anything.
    */
   analyze(index: number) {
     const page = this.snapshot.pages[index];
     const regions = this.snapshot.states[index]?.translation?.regions;
     if (!page || !regions?.length) return;
     if (this.snapshot.visions[index] || this.analyzing.has(index)) return;
+
+    const remembered = this.visionMemory.get(index);
+    if (remembered) {
+      this.emit({ visions: { ...this.snapshot.visions, [index]: remembered } });
+      return;
+    }
+
     this.analyzing.add(index);
-    void analyzeRegions(
-      page.url,
-      regions.map((r) => ({
-        id: r.id,
-        box: r.box,
-        sfx: (this.snapshot.overrides[r.id]?.kind ?? r.kind) === "sfx",
-      })),
-    )
-      .then((visions) => {
+    void (async () => {
+      try {
+        const id = this.identity(index);
+        const stored = await renderCache.get<Record<string, BlockVision>>(id);
+        if (stored && regions.every((r) => stored[r.id])) {
+          this.visionMemory.set(index, stored);
+          this.emit({ visions: { ...this.snapshot.visions, [index]: stored } });
+          return;
+        }
+        this.setPage(index, { ...(this.snapshot.states[index] ?? { status: "done" }), status: "cleaning" });
+        const visions = await analyzeRegions(
+          page.url,
+          regions.map((r) => ({
+            id: r.id,
+            box: r.box,
+            sfx: (this.snapshot.overrides[r.id]?.kind ?? r.kind) === "sfx",
+          })),
+        );
+        this.visionMemory.set(index, visions);
+        void renderCache.set(id, visions);
         this.emit({ visions: { ...this.snapshot.visions, [index]: visions } });
-      })
-      .catch(() => undefined)
-      .finally(() => this.analyzing.delete(index));
+      } catch {
+        /* cleanup failure leaves the original artwork untouched */
+      } finally {
+        this.analyzing.delete(index);
+        const state = this.snapshot.states[index];
+        if (state?.status === "cleaning") this.setPage(index, { ...state, status: "done" });
+      }
+    })();
   }
 
-  /** Frees analysis memory for pages far from the viewport. */
+  /**
+   * Releases the snapshot's active rendering window. Results stay in memory and
+   * in the persistent cache, so re-entry is instant and never reprocesses.
+   */
   prune(keep: number[]) {
     const set = new Set(keep);
     const next: Record<number, Record<string, BlockVision>> = {};
@@ -245,6 +350,16 @@ class SessionStore {
       else changed = true;
     }
     if (changed) this.emit({ visions: next });
+
+    // Bound in-memory plates for very long chapters; the cache still has them.
+    if (this.visionMemory.size > 24) {
+      const far = [...this.visionMemory.keys()]
+        .filter((k) => !set.has(k))
+        .sort((a, b) => Math.abs(b - (keep[0] ?? 0)) - Math.abs(a - (keep[0] ?? 0)));
+      for (const key of far.slice(0, this.visionMemory.size - 24)) {
+        this.visionMemory.delete(key);
+      }
+    }
   }
 
   // ---- manual block editing ----------------------------------------------
@@ -330,11 +445,16 @@ class SessionStore {
   }
 
   retry(index: number) {
+    const id = this.identity(index);
+    void translationCache.drop(id);
+    void renderCache.drop(id);
+    this.translationMemory.delete(index);
+    this.visionMemory.delete(index);
     const visions = { ...this.snapshot.visions };
     delete visions[index];
     this.emit({ visions });
     this.setPage(index, { status: "idle" });
-    this.request(index, true);
+    void this.request(index, 0);
   }
 
   clearCache() {
@@ -342,8 +462,11 @@ class SessionStore {
     for (const key of Object.keys(localStorage)) {
       if (key.startsWith(prefix)) localStorage.removeItem(key);
     }
+    void idbClearAll();
     this.undoStack = [];
     this.redoStack = [];
+    this.visionMemory.clear();
+    this.translationMemory.clear();
     this.emit({
       states: {},
       glossary: [],
@@ -371,7 +494,7 @@ function writeJson(key: string, value: unknown) {
   try {
     localStorage.setItem(key, JSON.stringify(value));
   } catch {
-    /* cache full — translations simply won't persist */
+    /* storage full — small metadata simply isn't persisted */
   }
 }
 
