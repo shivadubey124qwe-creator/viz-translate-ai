@@ -115,10 +115,8 @@ export async function runPageTranslation(input: {
   targetLanguage: string;
   glossary: GlossaryEntry[];
   contextSummary: string;
+  previousPageText?: string;
 }): Promise<PageTranslation> {
-  const key = process.env["LOVABLE_API_KEY"];
-  if (!key) throw new Error("AI is not configured for this project.");
-
   const started = Date.now();
   const glossaryText = input.glossary.length
     ? input.glossary
@@ -127,59 +125,29 @@ export async function runPageTranslation(input: {
         .join("\n")
     : "(empty)";
 
-  const res = await fetch(GATEWAY, {
-    method: "POST",
-    headers: {
-      "Content-Type": "application/json",
-      "Lovable-API-Key": key,
-    },
-    body: JSON.stringify({
-      model: MODEL,
-      messages: [
-        { role: "system", content: SYSTEM },
-        {
-          role: "user",
-          content: [
-            {
-              type: "text",
-              text: [
-                `Series: ${input.seriesTitle || "unknown"}`,
-                `Page index: ${input.pageIndex}`,
-                `Target language: ${input.targetLanguage}`,
-                `Story so far: ${input.contextSummary || "(start of chapter)"}`,
-                `Translation memory / glossary:\n${glossaryText}`,
-                `Translate this page and return the JSON. Also return a 2-3 sentence updated story summary that continues the "story so far".`,
-              ].join("\n\n"),
-            },
-            { type: "image_url", image_url: { url: input.imageDataUrl } },
-          ],
-        },
-      ],
-      response_format: {
-        type: "json_schema",
-        json_schema: { name: "page_translation", strict: true, schema: SCHEMA },
-      },
-    }),
+  const { content: raw, provider } = await routeTranslation({
+    system: SYSTEM,
+    schema: SCHEMA,
+    schemaName: "page_translation",
+    imageDataUrl: input.imageDataUrl,
+    userText: [
+      `Series: ${input.seriesTitle || "unknown"}`,
+      `Page index: ${input.pageIndex}`,
+      `Target language: ${input.targetLanguage}`,
+      `Story so far: ${input.contextSummary || "(start of chapter)"}`,
+      `Previous page dialogue: ${input.previousPageText?.slice(0, 1200) || "(none)"}`,
+      `Translation memory / glossary:\n${glossaryText}`,
+      `Translate this page and return the JSON. Also return a 2-3 sentence updated story summary that continues the "story so far".`,
+    ].join("\n\n"),
   });
 
-  if (!res.ok) {
-    const detail = await res.text();
-    if (res.status === 429) throw new Error("Rate limited by the AI gateway. Try again shortly.");
-    if (res.status === 402)
-      throw new Error("AI credits exhausted. Add credits to keep translating.");
-    throw new Error(`Translation failed (${res.status}): ${detail.slice(0, 300)}`);
-  }
-
-  const json = (await res.json()) as {
-    choices?: { message?: { content?: string } }[];
-  };
-  const raw = json.choices?.[0]?.message?.content ?? "";
   let parsed: {
     sourceLanguage?: string;
     summary?: string;
     regions?: Omit<PageRegion, "id">[];
     glossary?: GlossaryEntry[];
   };
+
   try {
     parsed = JSON.parse(raw);
   } catch {
