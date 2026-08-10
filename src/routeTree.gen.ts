@@ -12,6 +12,7 @@ import { Route as rootRouteImport } from './routes/__root'
 import { Route as IndexRouteImport } from './routes/index'
 import { Route as ReaderRouteImport } from './routes/reader'
 import { Route as ApiPublicImageRouteImport } from './routes/api/public/image'
+import { Route as ApiPublicProviderSelftestRouteImport } from './routes/api/public/provider-selftest'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -28,35 +29,51 @@ const ApiPublicImageRoute = ApiPublicImageRouteImport.update({
   path: '/api/public/image',
   getParentRoute: () => rootRouteImport,
 } as any)
+const ApiPublicProviderSelftestRoute =
+  ApiPublicProviderSelftestRouteImport.update({
+    id: '/api/public/provider-selftest',
+    path: '/api/public/provider-selftest',
+    getParentRoute: () => rootRouteImport,
+  } as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
   '/reader': typeof ReaderRoute
   '/api/public/image': typeof ApiPublicImageRoute
+  '/api/public/provider-selftest': typeof ApiPublicProviderSelftestRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
   '/reader': typeof ReaderRoute
   '/api/public/image': typeof ApiPublicImageRoute
+  '/api/public/provider-selftest': typeof ApiPublicProviderSelftestRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
   '/': typeof IndexRoute
   '/reader': typeof ReaderRoute
   '/api/public/image': typeof ApiPublicImageRoute
+  '/api/public/provider-selftest': typeof ApiPublicProviderSelftestRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
-  fullPaths: '/' | '/reader' | '/api/public/image'
+  fullPaths:
+    '/' | '/reader' | '/api/public/image' | '/api/public/provider-selftest'
   fileRoutesByTo: FileRoutesByTo
-  to: '/' | '/reader' | '/api/public/image'
-  id: '__root__' | '/' | '/reader' | '/api/public/image'
+  to: '/' | '/reader' | '/api/public/image' | '/api/public/provider-selftest'
+  id:
+    | '__root__'
+    | '/'
+    | '/reader'
+    | '/api/public/image'
+    | '/api/public/provider-selftest'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
   IndexRoute: typeof IndexRoute
   ReaderRoute: typeof ReaderRoute
   ApiPublicImageRoute: typeof ApiPublicImageRoute
+  ApiPublicProviderSelftestRoute: typeof ApiPublicProviderSelftestRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -82,6 +99,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ApiPublicImageRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/api/public/provider-selftest': {
+      id: '/api/public/provider-selftest'
+      path: '/api/public/provider-selftest'
+      fullPath: '/api/public/provider-selftest'
+      preLoaderRoute: typeof ApiPublicProviderSelftestRouteImport
+      parentRoute: typeof rootRouteImport
+    }
   }
 }
 
@@ -89,17 +113,8 @@ const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   ReaderRoute: ReaderRoute,
   ApiPublicImageRoute: ApiPublicImageRoute,
+  ApiPublicProviderSelftestRoute: ApiPublicProviderSelftestRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)
   ._addFileTypes<FileRouteTypes>()
-
-import type { getRouter } from './router.tsx'
-import type { startInstance } from './start.ts'
-declare module '@tanstack/react-start' {
-  interface Register {
-    ssr: true
-    router: Awaited<ReturnType<typeof getRouter>>
-    config: Awaited<ReturnType<typeof startInstance.getOptions>>
-  }
-}

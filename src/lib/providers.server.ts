@@ -46,10 +46,46 @@ interface ProviderDef {
   model: string;
   /** Bearer vs. Lovable-API-Key header style. */
   auth: "bearer" | "lovable";
+  /** Resolve the model lazily (Bytez catalogue differs per account). */
+  resolveModel?: (key: string) => Promise<string | null>;
 }
 
 const COOLDOWN_MS = 5 * 60 * 1000;
+/** Model/config problems (404/400) will not fix themselves in five minutes. */
+const HARD_COOLDOWN_MS = 6 * 60 * 60 * 1000;
 const TIMEOUT_MS = 90_000;
+
+/**
+ * Bytez exposes a per-account catalogue, so a hardcoded model id 404s on most
+ * keys. Resolve the best available chat model once per key and cache it.
+ */
+const bytezModels = new Map<string, string | null>();
+
+async function resolveBytezModel(key: string): Promise<string | null> {
+  if (bytezModels.has(key)) return bytezModels.get(key) ?? null;
+  const explicit = process.env["BYTEZ_MODEL"]?.trim();
+  if (explicit) {
+    bytezModels.set(key, explicit);
+    return explicit;
+  }
+  let picked: string | null = null;
+  try {
+    const res = await fetch("https://api.bytez.com/models/v2/list/models?task=chat", {
+      headers: { Authorization: `Bearer ${key}` },
+    });
+    const json = (await res.json()) as { output?: unknown };
+    const ids = Array.isArray(json.output)
+      ? json.output.filter((m): m is string => typeof m === "string" && m.length > 0)
+      : [];
+    // Prefer multimodal models — the page pipeline always sends an image.
+    picked =
+      ids.find((m) => /vl|vision|gemma-3|pixtral|llava/i.test(m)) ?? ids[0] ?? null;
+  } catch {
+    picked = null;
+  }
+  bytezModels.set(key, picked);
+  return picked;
+}
 
 const DEFS: ProviderDef[] = [
   ...[1, 2, 3, 4].map((n) => ({
@@ -57,17 +93,22 @@ const DEFS: ProviderDef[] = [
     keyId: `bytez#${n}`,
     envVar: `BYTEZ_API_KEY_${n}`,
     endpoint: "https://api.bytez.com/models/v2/openai/v1/chat/completions",
-    model: "google/gemma-3-27b-it",
+    model: "",
     auth: "bearer" as const,
+    resolveModel: resolveBytezModel,
   })),
   ...[1, 2].map((n) => ({
     name: "nvidia-nim",
     keyId: `nim#${n}`,
     envVar: `NVIDIA_NIM_API_KEY_${n}`,
     endpoint: "https://integrate.api.nvidia.com/v1/chat/completions",
-    model: "meta/llama-4-maverick-17b-128e-instruct",
+    model: "",
     auth: "bearer" as const,
+    // Read at call time: env is injected per request on the edge runtime.
+    resolveModel: async () =>
+      process.env["NVIDIA_NIM_MODEL"]?.trim() || "nvidia/nemotron-nano-12b-v2-vl",
   })),
+
   {
     name: "lovable",
     keyId: "lovable",
@@ -77,6 +118,7 @@ const DEFS: ProviderDef[] = [
     auth: "lovable",
   },
 ];
+
 
 interface State {
   requests: number;
@@ -141,7 +183,7 @@ function isRetryable(status: number) {
   return status === 402 || status === 408 || status === 409 || status === 429 || status >= 500;
 }
 
-async function callProvider(def: ProviderDef, key: string, call: ProviderCall) {
+async function callProvider(def: ProviderDef, key: string, model: string, call: ProviderCall) {
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), TIMEOUT_MS);
   try {
@@ -155,7 +197,8 @@ async function callProvider(def: ProviderDef, key: string, call: ProviderCall) {
           : { Authorization: `Bearer ${key}` }),
       },
       body: JSON.stringify({
-        model: def.model,
+        model,
+
         messages: [
           { role: "system", content: call.system },
           {
@@ -215,8 +258,16 @@ export async function routeTranslation(call: ProviderCall): Promise<ProviderResu
     if (!available(def)) continue;
 
     const s = stateFor(def.keyId);
+    const model = def.resolveModel ? await def.resolveModel(key) : def.model;
+    if (!model) {
+      // No usable model on this account — skip it for a long while.
+      s.cooldownUntil = Date.now() + HARD_COOLDOWN_MS;
+      errors.push(`${def.keyId}: no model available`);
+      continue;
+    }
+
     s.requests++;
-    const result = await callProvider(def, key, call);
+    const result = await callProvider(def, key, model, call);
 
     if (result.ok) {
       s.successes++;
@@ -233,11 +284,12 @@ export async function routeTranslation(call: ProviderCall): Promise<ProviderResu
       errors.push(`${def.keyId}: ${result.status}`);
       continue;
     }
-    // A non-retryable error (bad request/auth) means this key stays skipped for
-    // the cooldown too, but the request itself is still worth trying elsewhere.
-    s.cooldownUntil = Date.now() + COOLDOWN_MS;
+    // Model/auth/bad-request errors do not recover on their own, so this key
+    // steps aside for much longer instead of burning a retry on every page.
+    s.cooldownUntil = Date.now() + HARD_COOLDOWN_MS;
     errors.push(`${def.keyId}: ${result.status} ${result.detail}`);
   }
+
 
   if (!sawConfigured) throw new Error("No translation provider is configured for this project.");
   throw new Error(
