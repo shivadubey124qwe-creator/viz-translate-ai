@@ -345,7 +345,10 @@ function Reader() {
             <span className="ml-auto text-xs text-muted-foreground">
               {done}/{snap.pages.length} translated · {snap.stats.cacheHits} cached
               {snap.stats.avgMs ? ` · ${snap.stats.avgMs}ms avg` : ""}
+              {state?.translation?.provider ? ` · ${state.translation.provider}` : ""}
+              {state?.origin ? ` · ${state.origin}` : ""}
             </span>
+
           </div>
         </header>
       )}
