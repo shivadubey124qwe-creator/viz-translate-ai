@@ -2,7 +2,7 @@ import { zipSync } from "fflate";
 import type { PageRegion } from "./translate.server";
 import type { LoadedPage } from "./loaders";
 import { buildBlocks, type BlockOverride, type TextBlock } from "./blocks";
-import { analyzeRegions } from "./vision";
+import { analyzeRegions, type BlockVision } from "./vision";
 import { familyFor, fitText, makeMeasurer } from "./typography";
 
 async function loadImage(url: string) {
