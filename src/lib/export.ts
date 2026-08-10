@@ -69,6 +69,8 @@ export async function renderPage(
   page: LoadedPage,
   regions: PageRegion[],
   overrides: Record<string, BlockOverride> = {},
+  /** Cleanup plates already produced by the reader; skips re-analysis. */
+  cachedVisions?: Record<string, BlockVision> | undefined,
 ): Promise<Blob> {
   const img = await loadImage(page.url);
   const canvas = document.createElement("canvas");
@@ -78,15 +80,19 @@ export async function renderPage(
   if (!ctx) throw new Error("Canvas is unavailable in this browser.");
   ctx.drawImage(img, 0, 0);
 
-  const visions = await analyzeRegions(
-    page.url,
-    regions.map((r) => ({
-      id: r.id,
-      box: r.box,
-      sfx: (overrides[r.id]?.kind ?? r.kind) === "sfx",
-    })),
-    { maxEdge: Math.min(2000, Math.max(canvas.width, canvas.height)) },
-  );
+  const complete =
+    cachedVisions && regions.length > 0 && regions.every((r) => cachedVisions[r.id]);
+  const visions = complete
+    ? cachedVisions
+    : await analyzeRegions(
+        page.url,
+        regions.map((r) => ({
+          id: r.id,
+          box: r.box,
+          sfx: (overrides[r.id]?.kind ?? r.kind) === "sfx",
+        })),
+        { maxEdge: Math.min(2000, Math.max(canvas.width, canvas.height)) },
+      );
   const blocks = buildBlocks(regions, visions, overrides, page.index);
 
   // Cleaned plates first, then the lettering on top.
@@ -110,7 +116,11 @@ export async function renderPage(
 
 export async function exportCbz(
   title: string,
-  pages: { page: LoadedPage; regions: PageRegion[] }[],
+  pages: {
+    page: LoadedPage;
+    regions: PageRegion[];
+    visions?: Record<string, BlockVision> | undefined;
+  }[],
   onProgress?: (done: number, total: number) => void,
   overrides: Record<string, BlockOverride> = {},
 ) {
@@ -118,10 +128,11 @@ export async function exportCbz(
   for (let i = 0; i < pages.length; i++) {
     const entry = pages[i];
     if (!entry) continue;
-    const blob = await renderPage(entry.page, entry.regions, overrides);
+    const blob = await renderPage(entry.page, entry.regions, overrides, entry.visions);
     files[`${String(i + 1).padStart(4, "0")}.jpg`] = new Uint8Array(await blob.arrayBuffer());
     onProgress?.(i + 1, pages.length);
   }
+
   const zipped = zipSync(files, { level: 0 });
   const url = URL.createObjectURL(
     new Blob([zipped as Uint8Array<ArrayBuffer>], { type: "application/vnd.comicbook+zip" }),
