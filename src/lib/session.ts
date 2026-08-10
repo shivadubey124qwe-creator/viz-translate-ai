@@ -338,6 +338,18 @@ class SessionStore {
   }
 
   /**
+   * Cleanup plates for an export, taken from memory or the render cache only —
+   * never recomputed. Export therefore reuses exactly what the reader showed.
+   */
+  async cachedVisions(index: number): Promise<Record<string, BlockVision> | undefined> {
+    const remembered = this.visionMemory.get(index);
+    if (remembered) return remembered;
+    const stored = await renderCache.get<Record<string, BlockVision>>(this.identity(index));
+    return stored ?? undefined;
+  }
+
+
+  /**
    * Releases the snapshot's active rendering window. Results stay in memory and
    * in the persistent cache, so re-entry is instant and never reprocesses.
    */
