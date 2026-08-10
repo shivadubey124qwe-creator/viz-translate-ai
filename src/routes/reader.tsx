@@ -251,16 +251,22 @@ function Reader() {
   async function handleExport() {
     setExporting("Rendering…");
     try {
-      const entries = snap.pages.map((p) => ({
-        page: p,
-        regions: snap.states[p.index]?.translation?.regions ?? [],
-      }));
+      // Reuse the cleanup plates the reader already produced: exporting a
+      // translated chapter never re-runs OCR, translation or cleanup.
+      const entries = await Promise.all(
+        snap.pages.map(async (p) => ({
+          page: p,
+          regions: snap.states[p.index]?.translation?.regions ?? [],
+          visions: await session.cachedVisions(p.index),
+        })),
+      );
       await exportCbz(
         snap.title,
         entries,
         (d, t) => setExporting(`Rendering ${d}/${t}…`),
         snap.overrides,
       );
+
     } catch (err) {
       setExporting(err instanceof Error ? err.message : "Export failed");
       setTimeout(() => setExporting(null), 2500);
@@ -339,7 +345,10 @@ function Reader() {
             <span className="ml-auto text-xs text-muted-foreground">
               {done}/{snap.pages.length} translated · {snap.stats.cacheHits} cached
               {snap.stats.avgMs ? ` · ${snap.stats.avgMs}ms avg` : ""}
+              {state?.translation?.provider ? ` · ${state.translation.provider}` : ""}
+              {state?.origin ? ` · ${state.origin}` : ""}
             </span>
+
           </div>
         </header>
       )}
